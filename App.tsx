@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { GameState, Choice, StorySegment } from './types';
 import { startGame, continueStory, generateSceneImage, getQuickInsight } from './services/gemini';
@@ -5,12 +6,14 @@ import { soundEngine } from './services/soundEngine';
 import InventoryList from './components/InventoryList';
 import QuestTracker from './components/QuestTracker';
 import StoryDisplay from './components/StoryDisplay';
+import RelationshipList from './components/RelationshipList';
 import { Heart, MessageCircleHeart, Volume2, VolumeX, Loader2, Save, FolderOpen } from 'lucide-react';
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>({
     history: [],
     inventory: [],
+    relationships: [],
     currentQuest: '',
     currentLocation: '',
     storyLog: [],
@@ -76,6 +79,9 @@ const App: React.FC = () => {
 
     try {
       const data = JSON.parse(saved) as GameState;
+      // Ensure relationships array exists for legacy saves
+      if (!data.relationships) data.relationships = [];
+      
       setGameState(data);
       
       if (data.sceneSnapshot) {
@@ -124,9 +130,45 @@ const App: React.FC = () => {
         });
       }
 
+      // Process Relationship Updates
+      const newRelationships = [...(prev.relationships || [])];
+      
+      if (segment.relationship_updates) {
+        segment.relationship_updates.forEach(update => {
+          const index = newRelationships.findIndex(r => r.id === update.id);
+          
+          if (index >= 0) {
+            // Update existing
+            const char = newRelationships[index];
+            let newValue = char.value + (update.delta || 0);
+            // Clamp 0-100
+            newValue = Math.max(0, Math.min(100, newValue));
+            
+            newRelationships[index] = {
+              ...char,
+              name: update.name || char.name, // can rename if needed
+              value: newValue,
+              relationshipType: update.setType || char.relationshipType
+            };
+          } else if (update.name) {
+            // Add new (default to 50 if not specified, then apply delta)
+            let val = 50 + (update.delta || 0);
+            val = Math.max(0, Math.min(100, val));
+            
+            newRelationships.push({
+              id: update.id,
+              name: update.name,
+              relationshipType: update.setType || 'neutral',
+              value: val
+            });
+          }
+        });
+      }
+
       return {
         ...prev,
         inventory: newInventory,
+        relationships: newRelationships,
         currentQuest: segment.current_quest || prev.currentQuest,
         currentLocation: segment.location_name || prev.currentLocation,
         storyLog: [
@@ -163,7 +205,8 @@ const App: React.FC = () => {
         updatedHistory, 
         choice.text,
         gameState.inventory,
-        gameState.currentQuest
+        gameState.currentQuest,
+        gameState.relationships
       );
       
       setGameState(prev => ({
@@ -234,6 +277,9 @@ const App: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
           <QuestTracker quest={gameState.currentQuest} location={gameState.currentLocation} />
+          
+          <RelationshipList characters={gameState.relationships} />
+
           <InventoryList items={gameState.inventory} />
           
           <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-800">

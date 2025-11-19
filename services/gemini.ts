@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type, SchemaType } from "@google/genai";
-import { GameState, StorySegment, QuickInsight } from '../types';
+import { GameState, StorySegment, QuickInsight, Character } from '../types';
 
 // Initialize Gemini Client
 const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -15,7 +16,7 @@ You are the Narrator for "Drama High", an infinite interactive novel for a teena
 The setting is a modern high school. The tone is emotional, dramatic, and relatable, similar to "Sweet Valley High" or a teen drama TV show.
 
 Your goal is to create a story driven by social dynamics, peer pressure, and consequences.
-You must track the user's "Backpack Items" (Inventory) and "Current Goal" (Quest).
+You must track the user's "Backpack Items" (Inventory), "Current Goal" (Quest), and "Relationships" with NPCs.
 
 RULES:
 1.  **Format**: ALWAYS return a valid JSON object matching the schema.
@@ -23,10 +24,15 @@ RULES:
     *   *Example*: Staying up late texting a boy -> Sleeping in class -> Failing a test.
     *   *Example*: Sharing a secret -> Losing a friend -> Sitting alone at lunch.
 3.  **Inventory**: Track items like 'Smartphone', 'Lip Gloss', 'Notes', 'Textbook', or abstract things like 'Invitation to Party'.
-4.  **Current Goal**: Update 'current_quest' to be the immediate social or academic objective (e.g., "Pass the Math Test", "Find out who started the rumor").
-5.  **Visuals**: Provide a 'visual_prompt' for an AI image generator.
+4.  **Relationships**: Track relationships with key characters.
+    *   Return 'relationship_updates' when the player interacts with a named character.
+    *   Use 'delta' to increase/decrease value (-10 to +10 usually). Scale is 0-100.
+    *   Use 'setType' if the dynamic changes (e.g., 'friend' becomes 'rival').
+    *   Introduce new characters via updates if they become relevant.
+5.  **Current Goal**: Update 'current_quest' to be the immediate social or academic objective (e.g., "Pass the Math Test", "Find out who started the rumor").
+6.  **Visuals**: Provide a 'visual_prompt' for an AI image generator.
     *   Style: Modern Digital Art, Webtoon Style, Soft Lighting, Expressive Characters, High School Aesthetic.
-6.  **Sound Cues**: Select a 'sound_cue' that matches the vibe.
+7.  **Sound Cues**: Select a 'sound_cue' that matches the vibe.
     *   'neutral': Normal conversation.
     *   'school_ambience': Hallways, cafeteria, classrooms.
     *   'party_ambience': Music, crowded places.
@@ -36,7 +42,7 @@ RULES:
     *   'school_bell': Class starting/ending.
     *   'gossip_whisper': Hearing rumors, secrets revealed.
     *   'success_chime': Acing a test, getting asked out.
-7.  **Tone**: Use modern teen slang appropriately but keep it readable. Focus on feelings, social status, and academic stress.
+8.  **Tone**: Use modern teen slang appropriately but keep it readable. Focus on feelings, social status, and academic stress.
 
 Your output will be parsed programmatically.
 `;
@@ -62,6 +68,19 @@ const RESPONSE_SCHEMA = {
       properties: {
         add: { type: Type.ARRAY, items: { type: Type.STRING } },
         remove: { type: Type.ARRAY, items: { type: Type.STRING } }
+      }
+    },
+    relationship_updates: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          name: { type: Type.STRING },
+          delta: { type: Type.NUMBER },
+          setType: { type: Type.STRING, enum: ['friend', 'crush', 'rival', 'enemy', 'neutral'] }
+        },
+        required: ['id']
       }
     },
     current_quest: { type: Type.STRING },
@@ -115,16 +134,20 @@ export const continueStory = async (
   history: { role: 'user' | 'model'; parts: { text: string }[] }[],
   choiceText: string,
   currentInventory: string[],
-  currentQuest: string
+  currentQuest: string,
+  relationships: Character[]
 ): Promise<StorySegment> => {
   const ai = getAiClient();
+
+  const relationshipSummary = relationships.map(r => `${r.name} (${r.relationshipType}: ${r.value})`).join(', ');
 
   const stateContext = `
     [Backpack/Status: ${currentInventory.join(', ') || 'None'}]
     [Current Goal: ${currentQuest || 'Unknown'}]
+    [Relationships: ${relationshipSummary || 'No specific relationships yet'}]
     
     I chose: "${choiceText}".
-    Continue the story. Remember consequences!
+    Continue the story. Remember consequences and social dynamics!
   `;
   
   const chatSession = ai.chats.create({
